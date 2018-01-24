@@ -26,10 +26,10 @@ namespace FastReplicate
 
         private static Func<object, MyClientInfo> GenerateAllocateClientInfo()
         {
-            var clientDataType = Type.GetType(ThreadedReplicationServer.ClientData.InternalTypeName);
+            var clientDataType = Type.GetType(ClientData.InternalTypeName);
             if (clientDataType == null)
                 throw new InvalidOperationException("Couldn't find " +
-                                                    ThreadedReplicationServer.ClientData.InternalTypeName);
+                                                    ClientData.InternalTypeName);
             var ctor = typeof(MyClientInfo).GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance, null,
                 new[] {clientDataType}, null);
             if (ctor == null)
@@ -162,10 +162,10 @@ namespace FastReplicate
         private static Func<object, IMyReplicable, HashSet<IMyReplicable>, MyTimeSpan, IslandData>
             GenerateCreateNewCachedIsland()
         {
-            var clientDataType = Type.GetType(ThreadedReplicationServer.ClientData.InternalTypeName);
+            var clientDataType = Type.GetType(ClientData.InternalTypeName);
             if (clientDataType == null)
                 throw new InvalidOperationException("Couldn't fine " +
-                                                    ThreadedReplicationServer.ClientData.InternalTypeName);
+                                                    ClientData.InternalTypeName);
 
             var type = Type.GetType(_clientDataIsland);
             if (type == null)
@@ -204,10 +204,10 @@ namespace FastReplicate
 
         private static Action<object, IslandData> GenerateRemoveCachedIsland()
         {
-            var clientDataType = Type.GetType(ThreadedReplicationServer.ClientData.InternalTypeName);
+            var clientDataType = Type.GetType(ClientData.InternalTypeName);
             if (clientDataType == null)
                 throw new InvalidOperationException("Couldn't fine " +
-                                                    ThreadedReplicationServer.ClientData.InternalTypeName);
+                                                    ClientData.InternalTypeName);
 
             var type = Type.GetType(_clientDataIsland);
             if (type == null)

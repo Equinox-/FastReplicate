@@ -140,8 +140,11 @@
     <Compile Include="..\Versioning\AssemblyVersion.cs">
       <Link>Properties\AssemblyVersion.cs</Link>
     </Compile>
+    <Compile Include="ClientData.cs" />
     <Compile Include="FastReplicatePlugin.cs" />
     <Compile Include="GeneratedMethods.cs" />
+    <Compile Include="BandwidthCounter.cs" />
+    <Compile Include="ListCache.cs" />
     <Compile Include="ThreadedReplicationServer.cs" />
   </ItemGroup>
   <ItemGroup>
