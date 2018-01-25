@@ -7,6 +7,8 @@ using System.Reflection;
 using System.Threading;
 using NLog;
 using Sandbox.Engine.Multiplayer;
+using Torch.Managers.PatchManager;
+using Torch.Managers.PatchManager.MSIL;
 using Torch.Utils;
 using VRage;
 using VRage.Collections;
@@ -28,7 +30,7 @@ namespace FastReplicate
         private readonly MyTimeSpan _maximumPacketGap = MyTimeSpan.FromSeconds(0.40000000596046448);
 
         public ThreadedReplicationServer(IReplicationServerCallback callback, EndpointId? localClientEndpoint,
-            bool usePlayoutDelayBuffer) : base(callback, localClientEndpoint, usePlayoutDelayBuffer)
+            bool usePlayoutDelayBuffer) : base(new ConcurrentReplicationCallback(callback), localClientEndpoint, usePlayoutDelayBuffer)
         {
         }
 
@@ -47,7 +49,7 @@ namespace FastReplicate
 
         public override void SendUpdate()
         {
-            MServerTimeStamp = MCallback.GetUpdateTime();
+            MServerTimeStamp = Callback.GetUpdateTime();
             MServerFrame += 1L;
             if (_clientStates.Count == 0)
                 return;
@@ -57,35 +59,33 @@ namespace FastReplicate
             MPriorityUpdates.ApplyChanges();
             if (MPriorityUpdates.Count > 0)
             {
-                _tmpHash.Clear();
+                TmpHash.Clear();
                 foreach (IMyReplicable myReplicable in MPriorityUpdates)
                 {
                     if (!myReplicable.HasToBeChild)
                         RefreshReplicable(myReplicable);
                     MPriorityUpdates.Remove(myReplicable, false);
-                    _tmpHash.Add(myReplicable);
+                    TmpHash.Add(myReplicable);
                 }
 
                 foreach (KeyValuePair<Endpoint, ClientData> keyValuePair in _clientStates)
                     if (keyValuePair.Value.IsReady)
-                        keyValuePair.Value.SendStateSync(_tmpHash);
-                _tmpHash.Clear();
+                        keyValuePair.Value.SendStateSync(TmpHash);
+                TmpHash.Clear();
 
                 MPriorityUpdates.ApplyRemovals();
                 return;
             }
-            
+
             if (ParallelSending)
             {
                 ParallelTasks.Parallel.ForEach(_clientStates, (x) =>
                 {
                     x.Value.UpdateNearbyReplicables();
                     x.Value.PrepareSendReplicables();
-                });
-
-                foreach (var x in _clientStates)
                     x.Value.DoSendReplicables();
-                ParallelTasks.Parallel.ForEach(_clientStates, (x) => x.Value.CleanupSendReplicables());
+                    x.Value.CleanupSendReplicables();
+                });
             }
             else
             {
@@ -165,23 +165,17 @@ namespace FastReplicate
             }
         }
 
-        public LockToken<IReplicationServerCallback> Callback(bool readOnly = false)
-        {
-            return new LockToken<IReplicationServerCallback>(MCallback, _callbackLock, readOnly);
-        }
-
         private EndpointId? MLocalClientEndpoint => _localClientEndpointGetter(this);
 
         private bool MUsePlayoutDelayBuffer => _usePlayoutDelayBufferGetter(this);
 
-        private readonly FastResourceLock _callbackLock = new FastResourceLock();
-        private IReplicationServerCallback MCallback => _callbackGetter(this);
+        public IReplicationServerCallback Callback => _callbackGetter(this);
 
         private Action<BitStream, EndpointId> MEventQueueSender => _eventQueueSenderGetter(this);
 
         private CacheList<IMyStateGroup> MTmpGroups => _tmpGroupsGetter(this);
 
-        private HashSet<IMyReplicable> _tmpHash => _tmpHashGetter(this);
+        private HashSet<IMyReplicable> TmpHash => _tmpHashGetter(this);
 
         private CachingHashSet<IMyReplicable> MPostponedDestructionReplicables =>
             _postponedDestructionReplicablesGetter(this);

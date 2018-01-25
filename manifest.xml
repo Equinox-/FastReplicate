@@ -2,6 +2,6 @@
 <PluginManifest xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <Name>FastReplicate</Name>
   <Guid>673dfcd0-3701-49d7-b3aa-448a19ca4a8a</Guid>
-  <Repository>TorchAPI/FastReplicate</Repository>
-  <Version>${VERSION}</Version>
+  <Repository>Equinox-/FastReplicate</Repository>
+  <Version>v0.1.0</Version>
 </PluginManifest>

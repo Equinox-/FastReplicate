@@ -439,6 +439,7 @@ namespace FastReplicate
                     return;
                 FillEntries(_replicablesToSend, _preparedStreaming, _preparedSorted);
             }
+
             _replicablesToSend.Clear();
         }
 
@@ -456,6 +457,7 @@ namespace FastReplicate
         {
             CleanupIslands();
         }
+
         #endregion
 
         #region Network API
@@ -463,20 +465,19 @@ namespace FastReplicate
         public void SendEmptyStateSync()
         {
             WritePacketHeader(false);
-            using (var callback = _server.Callback())
-                callback.Value.SendStateSync(_sendStream, State.EndpointId, false);
+            _server.Callback.SendStateSync(_sendStream, State.EndpointId, false);
         }
 
         private readonly List<MyStateDataEntry> _preparedStreaming = new List<MyStateDataEntry>();
         private readonly List<MyStateDataEntry> _preparedSorted = new List<MyStateDataEntry>();
-        
+
         private void SendStateSync(ICollection<MyStateDataEntry> streaming, IList<MyStateDataEntry> sorted)
         {
             if (StateGroups.Count == 0 || DirtyGroups.Count == 0)
                 return;
-            EventQueue.Send();
-            byte b = (byte)(LastReceivedAckId - 6);
-            byte b2 = (byte)(StateSyncPacketId + 1);
+                EventQueue.Send();
+            byte b = (byte) (LastReceivedAckId - 6);
+            byte b2 = (byte) (StateSyncPacketId + 1);
             if (WaitingForReset || b2 == b)
             {
                 WaitingForReset = true;
@@ -553,9 +554,7 @@ namespace FastReplicate
             if (!IsReady)
                 return;
 
-            MyTimeSpan updateTime;
-            using (var callback = _server.Callback())
-                updateTime = callback.Value.GetUpdateTime();
+            var updateTime = _server.Callback.GetUpdateTime();
 
             bool exists = Replicables.TryGetValue(replicable, out MyReplicableClientData data);
             float priority =
@@ -793,17 +792,14 @@ namespace FastReplicate
             _sendStream.WriteDouble(result.Milliseconds);
             _sendStream.WriteDouble(LastClientRealtime.Milliseconds);
             LastClientRealtime = MyTimeSpan.FromMilliseconds(-1.0);
-            using (var callback = _server.Callback())
-                callback.Value.SendCustomState(_sendStream);
+                _server.Callback.SendCustomState(_sendStream);
             return result;
         }
 
         private bool SendStateSync(IList<MyStateDataEntry> toSend, bool removeSent = true)
         {
             MyTimeSpan timestamp = WritePacketHeader(false);
-            int mtusize;
-            using (var callback = _server.Callback())
-                mtusize = callback.Value.GetMTUSize(State.EndpointId);
+            int mtusize = _server.Callback.GetMTUSize(State.EndpointId);
             int maxBitsToSend = 8 * (mtusize - 8 - 1);
             int maxEntriesToSend = mtusize / 8;
             int entriesSent = 0;
@@ -847,9 +843,8 @@ namespace FastReplicate
                         toSend.RemoveAt(removedIndices.Value[i] - i);
                 }
             }
-
-            using (var callback = _server.Callback())
-                callback.Value.SendStateSync(_sendStream, State.EndpointId, false);
+            
+                _server.Callback.SendStateSync(_sendStream, State.EndpointId, false);
             return acksSent > 0;
         }
 
@@ -887,22 +882,19 @@ namespace FastReplicate
             if (isStreaming)
             {
                 Replicables[obj].IsStreaming = true;
-                using (var callback = _server.Callback())
-                    callback.Value.SendReplicationCreateStreamed(_sendStream, _clientEndpoint);
+                    _server.Callback.SendReplicationCreateStreamed(_sendStream, _clientEndpoint);
                 return;
             }
 
             obj.OnSave(_sendStream);
-            using (var callback = _server.Callback())
-                callback.Value.SendReplicationCreate(_sendStream, _clientEndpoint);
+                _server.Callback.SendReplicationCreate(_sendStream, _clientEndpoint);
         }
 
         private void SendReplicationIslandDone(byte islandIndex)
         {
             _sendStream.ResetWrite();
             _sendStream.WriteByte(islandIndex);
-            using (var callback = _server.Callback())
-                callback.Value.SendReplicationIslandDone(_sendStream, _clientEndpoint);
+                _server.Callback.SendReplicationIslandDone(_sendStream, _clientEndpoint);
         }
 
         private void SendStreamingEntries(ICollection<MyStateDataEntry> streaming)
@@ -945,8 +937,7 @@ namespace FastReplicate
             else
                 entry.Group.OnAck(State, StateSyncPacketId, false);
 
-            using (var callback = _server.Callback())
-                callback.Value.SendStateSync(_sendStream, _clientEndpoint, true);
+            _server.Callback.SendStateSync(_sendStream, _clientEndpoint, true);
             IMyReplicable owner = entry.Group.Owner;
             if (owner == null)
                 return;
@@ -972,8 +963,7 @@ namespace FastReplicate
             _sendStream.ResetWrite();
             _sendStream.WriteNetworkId(_server.GetNetworkIdByObject(obj));
 
-            using (var callback = _server.Callback())
-                callback.Value.SendReplicationDestroy(_sendStream, _clientEndpoint);
+            _server.Callback.SendReplicationDestroy(_sendStream, _clientEndpoint);
         }
 
         #endregion
