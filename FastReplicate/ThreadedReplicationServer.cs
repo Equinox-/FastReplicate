@@ -45,10 +45,15 @@ namespace FastReplicate
                 client.Value.RefreshReplicable(rep, false);
         }
 
-        private const bool ParallelSending = true;
+        public static bool UseReplicationHack = true;
 
         public override void SendUpdate()
         {
+            if (!UseReplicationHack)
+            {
+                base.SendUpdate();
+                return;
+            }
             MServerTimeStamp = Callback.GetUpdateTime();
             MServerFrame += 1L;
             if (_clientStates.Count == 0)
@@ -76,9 +81,7 @@ namespace FastReplicate
                 MPriorityUpdates.ApplyRemovals();
                 return;
             }
-
-            if (ParallelSending)
-            {
+            
                 ParallelTasks.Parallel.ForEach(_clientStates, (x) =>
                 {
                     x.Value.UpdateNearbyReplicables();
@@ -86,17 +89,6 @@ namespace FastReplicate
                     x.Value.DoSendReplicables();
                     x.Value.CleanupSendReplicables();
                 });
-            }
-            else
-            {
-                foreach (var x in _clientStates)
-                {
-                    x.Value.UpdateNearbyReplicables();
-                    x.Value.PrepareSendReplicables();
-                    x.Value.DoSendReplicables();
-                    x.Value.CleanupSendReplicables();
-                }
-            }
 
 
             foreach (var client in _clientStates)
