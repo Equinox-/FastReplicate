@@ -146,6 +146,7 @@
     <Compile Include="GeneratedMethods.cs" />
     <Compile Include="BandwidthCounter.cs" />
     <Compile Include="ListCache.cs" />
+    <Compile Include="Patch.cs" />
     <Compile Include="ThreadedReplicationServer.cs" />
     <Compile Include="FastReplicateUi.xaml.cs">
       <DependentUpon>FastReplicateUi.xaml</DependentUpon>

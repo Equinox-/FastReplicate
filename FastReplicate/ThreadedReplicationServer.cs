@@ -5,7 +5,9 @@ using System.Linq.Expressions;
 using System.Net;
 using System.Reflection;
 using System.Threading;
+using System.Threading.Tasks;
 using NLog;
+using ParallelTasks;
 using Sandbox.Engine.Multiplayer;
 using Torch.Managers.PatchManager;
 using Torch.Managers.PatchManager.MSIL;
@@ -30,7 +32,8 @@ namespace FastReplicate
         private readonly MyTimeSpan _maximumPacketGap = MyTimeSpan.FromSeconds(0.40000000596046448);
 
         public ThreadedReplicationServer(IReplicationServerCallback callback, EndpointId? localClientEndpoint,
-            bool usePlayoutDelayBuffer) : base(new ConcurrentReplicationCallback(callback), localClientEndpoint, usePlayoutDelayBuffer)
+            bool usePlayoutDelayBuffer) : base(new ConcurrentReplicationCallback(callback), localClientEndpoint,
+            usePlayoutDelayBuffer)
         {
         }
 
@@ -41,7 +44,7 @@ namespace FastReplicate
 
         private void RefreshReplicable(IMyReplicable rep)
         {
-            foreach (var client in _clientStates)
+            foreach (var client in ClientStates)
                 client.Value.RefreshReplicable(rep, false);
         }
 
@@ -54,9 +57,10 @@ namespace FastReplicate
                 base.SendUpdate();
                 return;
             }
+
             MServerTimeStamp = Callback.GetUpdateTime();
             MServerFrame += 1L;
-            if (_clientStates.Count == 0)
+            if (ClientStates.Count == 0)
                 return;
 
             Stats_ObjectsRefreshed = 0;
@@ -73,7 +77,7 @@ namespace FastReplicate
                     TmpHash.Add(myReplicable);
                 }
 
-                foreach (KeyValuePair<Endpoint, ClientData> keyValuePair in _clientStates)
+                foreach (KeyValuePair<Endpoint, ClientData> keyValuePair in ClientStates)
                     if (keyValuePair.Value.IsReady)
                         keyValuePair.Value.SendStateSync(TmpHash);
                 TmpHash.Clear();
@@ -81,17 +85,15 @@ namespace FastReplicate
                 MPriorityUpdates.ApplyRemovals();
                 return;
             }
-            
-                ParallelTasks.Parallel.ForEach(_clientStates, (x) =>
-                {
-                    x.Value.UpdateNearbyReplicables();
-                    x.Value.PrepareSendReplicables();
-                    x.Value.DoSendReplicables();
-                    x.Value.CleanupSendReplicables();
-                });
+
+//            ParallelTasks.Parallel.ForEach(_clientStates, (x) => x.Value.Update());
+//            System.Threading.Tasks.Parallel.ForEach(ClientStates.Values, (x) => x.Update());
+            System.Threading.Tasks.Parallel.For(0, ClientStates.Values.Count, new ParallelOptions(),
+                (x) => ClientStates.Values[x].Update());
+//            ParallelTasks.Parallel.For(0, ClientStates.Values.Count, (x) => ClientStates.Values[x].Update());
 
 
-            foreach (var client in _clientStates)
+            foreach (var client in ClientStates)
             {
                 if (MServerTimeStamp > client.Value.LastStateSyncTimeStamp + _maximumPacketGap)
                     client.Value.SendEmptyStateSync();
@@ -201,7 +203,7 @@ namespace FastReplicate
         /// <summary>
         ///     Network objects and states which are actively replicating to clients.
         /// </summary>
-        private IProxyDictionary<Endpoint, ClientData> _clientStates
+        private IProxyDictionary<Endpoint, ClientData> ClientStates
         {
             get
             {
@@ -325,6 +327,7 @@ namespace FastReplicate
 
         private interface IProxyDictionary<TK, TV> : IEnumerable<KeyValuePair<TK, TV>>
         {
+            IReadOnlyList<TV> Values { get; }
             int Count { get; }
         }
 
@@ -335,6 +338,9 @@ namespace FastReplicate
             private readonly ProxyModifier<TK, TB, TV> _proxyModifier;
             private readonly Dictionary<TK, TV> _proxyStorage;
             private readonly Dictionary<TK, TB> _backing;
+            private readonly List<TV> _values;
+
+            public IReadOnlyList<TV> Values => _values;
 
             private static readonly Func<Dictionary<TK, TB>, int> _backingVersionGet =
                 FieldAccess.CreateGetter<Dictionary<TK, TB>, int>(
@@ -346,6 +352,7 @@ namespace FastReplicate
 
             public ProxyDictionary(Dictionary<TK, TB> backing, ProxyModifier<TK, TB, TV> proxyAllocator)
             {
+                _values = new List<TV>();
                 _backing = backing;
                 _proxyStorage = new Dictionary<TK, TV>(_backing.Comparer);
                 _proxyModifier = proxyAllocator;
@@ -366,19 +373,25 @@ namespace FastReplicate
                 foreach (var l in _proxyStorage)
                     if (!_backing.ContainsKey(l.Key))
                     {
+                        _values.Remove(l.Value);
                         (l.Value as IDisposable)?.Dispose();
                         toRemove.Add(l.Key);
                     }
 
                 foreach (var l in toRemove)
                     _proxyStorage.Remove(l);
+
                 toRemove.Clear();
 
                 foreach (var l in _backing)
                 {
-                    var tmp = _proxyStorage.GetValueOrDefault(l.Key);
+                    var exists = _proxyStorage.TryGetValue(l.Key, out var tmp);
                     if (_proxyModifier.Invoke(l.Key, l.Value, ref tmp))
+                    {
+                        if (tmp != null && !exists)
+                            _values.Add(tmp);
                         _proxyStorage[l.Key] = tmp;
+                    }
                 }
             }
 

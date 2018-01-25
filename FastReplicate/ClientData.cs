@@ -344,6 +344,14 @@ namespace FastReplicate
 
         #region Ticking Updates
 
+        public void Update()
+        {
+            UpdateNearbyReplicables();
+            PrepareSendReplicables();
+            DoSendReplicables();
+            CleanupSendReplicables();
+        }
+
         public void UpdateNearbyReplicables()
         {
             if (!IsReady) return;
@@ -475,7 +483,7 @@ namespace FastReplicate
         {
             if (StateGroups.Count == 0 || DirtyGroups.Count == 0)
                 return;
-                EventQueue.Send();
+            EventQueue.Send();
             byte b = (byte) (LastReceivedAckId - 6);
             byte b2 = (byte) (StateSyncPacketId + 1);
             if (WaitingForReset || b2 == b)
@@ -702,28 +710,17 @@ namespace FastReplicate
 
         private struct ReplicableLock : IDisposable
         {
-            private static readonly object _lockAntennaSystem = new object();
-
             private readonly IMyReplicable _rep;
 
             public ReplicableLock(IMyReplicable r)
             {
                 _rep = r;
-
-                // ReSharper disable once ConvertIfStatementToConditionalTernaryExpression
-                if (r is MyEntityReplicableBaseEvent<MyCharacter>)
-                    Monitor.Enter(_lockAntennaSystem);
-                else
-                    Monitor.Enter(r);
+                Monitor.Enter(r);
             }
 
             public void Dispose()
             {
-                // ReSharper disable once ConvertIfStatementToConditionalTernaryExpression
-                if (_rep is MyEntityReplicableBaseEvent<MyCharacter>)
-                    Monitor.Exit(_lockAntennaSystem);
-                else
-                    Monitor.Exit(_rep);
+                Monitor.Exit(_rep);
             }
         }
 
@@ -792,7 +789,7 @@ namespace FastReplicate
             _sendStream.WriteDouble(result.Milliseconds);
             _sendStream.WriteDouble(LastClientRealtime.Milliseconds);
             LastClientRealtime = MyTimeSpan.FromMilliseconds(-1.0);
-                _server.Callback.SendCustomState(_sendStream);
+            _server.Callback.SendCustomState(_sendStream);
             return result;
         }
 
@@ -805,6 +802,9 @@ namespace FastReplicate
             int entriesSent = 0;
             _bandwidthCounter.Clear();
             int acksSent = 0;
+
+            int maxBitsToSerialize = maxBitsToSend * 9 / 10;
+
             using (var removedIndices = ListCache<int>.BorrowList())
             {
                 for (var index = 0; index < toSend.Count; index++)
@@ -831,10 +831,9 @@ namespace FastReplicate
                         _sendStream.SetBitPositionWrite(originalPosition);
                     }
 
-                    if (entriesSent >= maxEntriesToSend || _sendStream.BitPosition >= maxBitsToSend || acksSent > 10)
-                    {
+                    if (entriesSent >= maxEntriesToSend || acksSent > 10 ||
+                        _sendStream.BitPosition >= maxBitsToSerialize)
                         break;
-                    }
                 }
 
                 if (removeSent)
@@ -843,8 +842,8 @@ namespace FastReplicate
                         toSend.RemoveAt(removedIndices.Value[i] - i);
                 }
             }
-            
-                _server.Callback.SendStateSync(_sendStream, State.EndpointId, false);
+
+            _server.Callback.SendStateSync(_sendStream, State.EndpointId, false);
             return acksSent > 0;
         }
 
@@ -882,19 +881,19 @@ namespace FastReplicate
             if (isStreaming)
             {
                 Replicables[obj].IsStreaming = true;
-                    _server.Callback.SendReplicationCreateStreamed(_sendStream, _clientEndpoint);
+                _server.Callback.SendReplicationCreateStreamed(_sendStream, _clientEndpoint);
                 return;
             }
 
             obj.OnSave(_sendStream);
-                _server.Callback.SendReplicationCreate(_sendStream, _clientEndpoint);
+            _server.Callback.SendReplicationCreate(_sendStream, _clientEndpoint);
         }
 
         private void SendReplicationIslandDone(byte islandIndex)
         {
             _sendStream.ResetWrite();
             _sendStream.WriteByte(islandIndex);
-                _server.Callback.SendReplicationIslandDone(_sendStream, _clientEndpoint);
+            _server.Callback.SendReplicationIslandDone(_sendStream, _clientEndpoint);
         }
 
         private void SendStreamingEntries(ICollection<MyStateDataEntry> streaming)
