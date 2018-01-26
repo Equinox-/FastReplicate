@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using NLog;
 using ParallelTasks;
 using Sandbox.Engine.Multiplayer;
+using Torch.Collections;
 using Torch.Managers.PatchManager;
 using Torch.Managers.PatchManager.MSIL;
 using Torch.Utils;
@@ -27,6 +28,17 @@ namespace FastReplicate
 {
     public class ThreadedReplicationServer : MyReplicationServer
     {
+        #region Config
+
+        public static bool UseReplicationHack = true;
+        public static int MaxStaticPackets = 8;
+        public static float TargetPacketFill = 0.9f;
+
+        public static readonly MtObservableSortedDictionary<ulong, ClientStatsViewModel> ClientStats =
+            new MtObservableSortedDictionary<ulong, ClientStatsViewModel>();
+
+        #endregion
+
         private static readonly Logger _log = LogManager.GetCurrentClassLogger();
 
         private readonly MyTimeSpan _maximumPacketGap = MyTimeSpan.FromSeconds(0.40000000596046448);
@@ -47,8 +59,6 @@ namespace FastReplicate
             foreach (var client in ClientStates)
                 client.Value.RefreshReplicable(rep, false);
         }
-
-        public static bool UseReplicationHack = true;
 
         public override void SendUpdate()
         {
@@ -214,8 +224,14 @@ namespace FastReplicate
                 var proxyType =
                     typeof(ProxyDictionary<,,>).MakeGenericType(typeof(Endpoint), typeof(ClientData), valType);
                 return _clientStatesProxy = (IProxyDictionary<Endpoint, ClientData>) Activator.CreateInstance(proxyType,
-                    o, new ProxyModifier<Endpoint, TClientData, ClientData>(ClientProxyAllocator));
+                    o, new ProxyModifier<Endpoint, TClientData, ClientData>(ClientProxyAllocator), new Action<Endpoint, ClientData>(ClientProxyDeallocator));
             }
+        }
+
+        private static void ClientProxyDeallocator(Endpoint ip, ClientData stor)
+        {
+            ClientStats.Remove(ip.Id.Value);
+            stor.Dispose();
         }
 
         private bool ClientProxyAllocator(Endpoint ip, TClientData backing, ref ClientData stor)
@@ -225,8 +241,10 @@ namespace FastReplicate
                 stor.InternalClientData = backing;
                 return false;
             }
-
-            stor = new ClientData(this, ip) {InternalClientData = backing};
+            
+            if (!ClientStats.TryGetValue(ip.Id.Value, out var stats))
+                stats = ClientStats[ip.Id.Value] = new ClientStatsViewModel(ip.Id.Value);
+            stor = new ClientData(this, ip, stats) {InternalClientData = backing};
             return true;
         }
 
@@ -354,17 +372,18 @@ namespace FastReplicate
                     typeof(Dictionary<TK, TB>).GetField("version", BindingFlags.Instance | BindingFlags.NonPublic));
 
             private readonly ThreadLocal<HashSet<TK>> _tmpRemoval;
+            private readonly Action<TK, TV> _deallocator;
 
             private int _lastVersion;
 
-            public ProxyDictionary(Dictionary<TK, TB> backing, ProxyModifier<TK, TB, TV> proxyAllocator)
+            public ProxyDictionary(Dictionary<TK, TB> backing, ProxyModifier<TK, TB, TV> proxyAllocator, Action<TK, TV> deallocator)
             {
                 _values = new List<TV>();
                 _backing = backing;
                 _proxyStorage = new Dictionary<TK, TV>(_backing.Comparer);
                 _proxyModifier = proxyAllocator;
                 _tmpRemoval = new ThreadLocal<HashSet<TK>>(() => new HashSet<TK>(_backing.Comparer));
-
+                _deallocator = deallocator;
                 CheckProxyTable(true);
             }
 
@@ -381,7 +400,7 @@ namespace FastReplicate
                     if (!_backing.ContainsKey(l.Key))
                     {
                         _values.Remove(l.Value);
-                        (l.Value as IDisposable)?.Dispose();
+                        _deallocator(l.Key, l.Value);
                         toRemove.Add(l.Key);
                     }
 
@@ -402,7 +421,14 @@ namespace FastReplicate
                 }
             }
 
-            public int Count => _backing.Count;
+            public int Count
+            {
+                get
+                {
+                    CheckProxyTable();
+                    return _backing.Count;
+                }
+            }
 
             public IEnumerator<KeyValuePair<TK, TV>> GetEnumerator()
             {

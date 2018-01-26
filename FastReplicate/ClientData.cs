@@ -8,6 +8,7 @@ using Sandbox.Game.Entities.Character;
 using Sandbox.Game.Replication;
 using Torch.Utils;
 using VRage.Collections;
+using VRage.Game;
 using VRage.Library.Collections;
 using VRage.Library.Utils;
 using VRage.Network;
@@ -334,12 +335,15 @@ namespace FastReplicate
         private readonly Endpoint _clientEndpoint;
         private readonly BitStream _sendStream = new BitStream();
         private readonly BandwidthCounter _bandwidthCounter;
+        private readonly ClientStatsViewModel _stats;
+        private long _totalBitsSent;
 
-        public ClientData(ThreadedReplicationServer server, Endpoint endpoint)
+        public ClientData(ThreadedReplicationServer server, Endpoint endpoint, ClientStatsViewModel stats)
         {
             _server = server;
             _clientEndpoint = endpoint;
             _bandwidthCounter = server.AllocateBandwidthCounter();
+            _stats = stats;
         }
 
         #region Ticking Updates
@@ -347,9 +351,10 @@ namespace FastReplicate
         public void Update()
         {
             UpdateNearbyReplicables();
-            PrepareSendReplicables();
-            DoSendReplicables();
-            CleanupSendReplicables();
+            SendReplicables();
+            _stats.TotalBitsSent = _totalBitsSent;
+            _stats.TickAverages();
+            _totalBitsSent = 0;
         }
 
         public void UpdateNearbyReplicables()
@@ -427,13 +432,15 @@ namespace FastReplicate
                 }
             }
 
+            _stats.TotalRoots = _lastLayerAdditions.Count;
             _toDeleteHash.Clear();
         }
 
-        public void PrepareSendReplicables()
+        public void SendReplicables()
         {
             if (!IsReady)
                 return;
+
             _replicablesToSend.Clear();
             foreach (var layer in UpdateLayers)
             {
@@ -441,29 +448,8 @@ namespace FastReplicate
                 layer.Sender.Iterate((x) => _replicablesToSend.Add(x));
             }
 
-            if (_replicablesToSend.Count > 0)
-            {
-                if (StateGroups.Count == 0 || DirtyGroups.Count == 0)
-                    return;
-                FillEntries(_replicablesToSend, _preparedStreaming, _preparedSorted);
-            }
-
+            SendStateSync(_replicablesToSend);
             _replicablesToSend.Clear();
-        }
-
-        public void DoSendReplicables()
-        {
-            if (StateGroups.Count == 0 || DirtyGroups.Count == 0)
-                return;
-            SendStateSync(_preparedStreaming, _preparedSorted);
-
-            _preparedStreaming.Clear();
-            _preparedSorted.Clear();
-        }
-
-        public void CleanupSendReplicables()
-        {
-            CleanupIslands();
         }
 
         #endregion
@@ -473,31 +459,41 @@ namespace FastReplicate
         public void SendEmptyStateSync()
         {
             WritePacketHeader(false);
+            _totalBitsSent += _sendStream.BitPosition;
             _server.Callback.SendStateSync(_sendStream, State.EndpointId, false);
         }
 
         private readonly List<MyStateDataEntry> _preparedStreaming = new List<MyStateDataEntry>();
         private readonly List<MyStateDataEntry> _preparedSorted = new List<MyStateDataEntry>();
 
-        private void SendStateSync(ICollection<MyStateDataEntry> streaming, IList<MyStateDataEntry> sorted)
+        private void SendStateSync(ICollection<MyStateDataEntry> streaming, IList<MyStateDataEntry> sorted, out int staticPacketsSent, out int streamingPacketsSent)
         {
             if (StateGroups.Count == 0 || DirtyGroups.Count == 0)
+            {
+                staticPacketsSent = 0;
+                streamingPacketsSent = 0;
                 return;
+            }
+
             EventQueue.Send();
             byte b = (byte) (LastReceivedAckId - 6);
             byte b2 = (byte) (StateSyncPacketId + 1);
             if (WaitingForReset || b2 == b)
             {
                 WaitingForReset = true;
+                staticPacketsSent = 0;
+                streamingPacketsSent = 0;
                 return;
             }
 
-            int num = 0;
-            while (SendStateSync(sorted) && num <= 7)
-                num++;
+            staticPacketsSent = 0;
+            while (staticPacketsSent < ThreadedReplicationServer.MaxStaticPackets && SendStateSync(sorted))
+                staticPacketsSent++;
 
-            if (_preparedStreaming.Count > 0)
-                SendStreamingEntries(streaming);
+            if (streaming.Count > 0)
+                SendStreamingEntries(streaming, out streamingPacketsSent);
+            else
+                streamingPacketsSent = 0;
         }
 
         private void CleanupIslands()
@@ -539,13 +535,27 @@ namespace FastReplicate
         public void SendStateSync(HashSet<IMyReplicable> replicables)
         {
             if (StateGroups.Count == 0 || DirtyGroups.Count == 0)
+            {
+                _stats.StreamingRoots = 0;
+                _stats.StaticReplicables = 0;
+                _stats.StaticPacketsSent = 0;
+                _stats.StreamingPacketsSent = 0;
+                _stats.StaticReplicablesUnsent = replicables.Count;
                 return;
+            }
+
             using (var streaming = ListCache<MyStateDataEntry>.BorrowList())
             {
                 using (var sorted = ListCache<MyStateDataEntry>.BorrowList())
                 {
                     FillEntries(replicables, streaming.Value, sorted.Value);
-                    SendStateSync(streaming.Value, sorted.Value);
+
+                    _stats.StreamingRoots = streaming.Value.Count;
+                    _stats.StaticReplicables = sorted.Value.Count;
+                    SendStateSync(streaming.Value, sorted.Value, out var bulk, out var streamingCount);
+                    _stats.StaticPacketsSent = bulk;
+                    _stats.StreamingPacketsSent = streamingCount;
+                    _stats.StaticReplicablesUnsent = sorted.Value.Count;
                 }
             }
 
@@ -803,7 +813,7 @@ namespace FastReplicate
             _bandwidthCounter.Clear();
             int acksSent = 0;
 
-            int maxBitsToSerialize = maxBitsToSend * 9 / 10;
+            var maxBitsToSerialize = (int) (maxBitsToSend * MathHelper.Clamp(ThreadedReplicationServer.TargetPacketFill, 0.25f, 1));
 
             using (var removedIndices = ListCache<int>.BorrowList())
             {
@@ -843,6 +853,7 @@ namespace FastReplicate
                 }
             }
 
+            _totalBitsSent += _sendStream.BitPosition;
             _server.Callback.SendStateSync(_sendStream, State.EndpointId, false);
             return acksSent > 0;
         }
@@ -881,11 +892,13 @@ namespace FastReplicate
             if (isStreaming)
             {
                 Replicables[obj].IsStreaming = true;
+                _totalBitsSent += _sendStream.BitPosition;
                 _server.Callback.SendReplicationCreateStreamed(_sendStream, _clientEndpoint);
                 return;
             }
 
             obj.OnSave(_sendStream);
+            _totalBitsSent += _sendStream.BitPosition;
             _server.Callback.SendReplicationCreate(_sendStream, _clientEndpoint);
         }
 
@@ -893,13 +906,16 @@ namespace FastReplicate
         {
             _sendStream.ResetWrite();
             _sendStream.WriteByte(islandIndex);
+            _totalBitsSent += _sendStream.BitPosition;
             _server.Callback.SendReplicationIslandDone(_sendStream, _clientEndpoint);
         }
 
-        private void SendStreamingEntries(ICollection<MyStateDataEntry> streaming)
+        private void SendStreamingEntries(ICollection<MyStateDataEntry> streaming, out int sent)
         {
+            sent = 0;
             MyStateDataEntry firstState = streaming.First();
             SendStreamingEntry(firstState);
+            sent++;
             if (GeneratedMethods.ClientDataReplicableToIslandTryGetValue(ReplicableToIsland,
                 (IMyStreamableReplicable) firstState.Group.Owner, out var islandData))
             {
@@ -910,9 +926,12 @@ namespace FastReplicate
                         streaming.Contains(stateGroup))
                     {
                         SendStreamingEntry(stateGroup);
+                        sent++;
                     }
                 }
             }
+
+            _stats.StreamingPacketsSent = sent;
         }
 
 
@@ -936,6 +955,7 @@ namespace FastReplicate
             else
                 entry.Group.OnAck(State, StateSyncPacketId, false);
 
+            _totalBitsSent += _sendStream.BitPosition;
             _server.Callback.SendStateSync(_sendStream, _clientEndpoint, true);
             IMyReplicable owner = entry.Group.Owner;
             if (owner == null)
@@ -948,8 +968,7 @@ namespace FastReplicate
                 {
                     if (HasReplicable(replicable))
                         continue;
-                    AddForClient(replicable,
-                        owner.GetPriority(GeneratedMethods.AllocateClientInfo(InternalClientData), true), false);
+                    AddForClient(replicable, owner.GetPriority(GeneratedMethods.AllocateClientInfo(InternalClientData), true), false);
                 }
             }
         }
@@ -962,6 +981,7 @@ namespace FastReplicate
             _sendStream.ResetWrite();
             _sendStream.WriteNetworkId(_server.GetNetworkIdByObject(obj));
 
+            _totalBitsSent += _sendStream.BitPosition;
             _server.Callback.SendReplicationDestroy(_sendStream, _clientEndpoint);
         }
 

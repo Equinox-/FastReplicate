@@ -14,12 +14,14 @@ using Torch;
 using Torch.API;
 using Torch.API.Managers;
 using Torch.API.Plugins;
+using Torch.Collections;
 using Torch.Managers.PatchManager;
 using Torch.Managers.PatchManager.MSIL;
 using Torch.Utils;
 using VRage.Library.Collections;
 using VRage.Network;
 using VRage.Replication;
+using VRageMath;
 
 namespace FastReplicate
 {
@@ -46,5 +48,19 @@ namespace FastReplicate
             get => ThreadedReplicationServer.UseReplicationHack;
             set => ThreadedReplicationServer.UseReplicationHack = value;
         }
+
+        public int MaxStaticPackets
+        {
+            get => ThreadedReplicationServer.MaxStaticPackets;
+            set => ThreadedReplicationServer.MaxStaticPackets = value;
+        }
+
+        public float TargetPacketFill
+        {
+            get => ThreadedReplicationServer.TargetPacketFill;
+            set => ThreadedReplicationServer.TargetPacketFill = MathHelper.Clamp(value, 0.25f, 1);
+        }
+
+        public MtObservableSortedDictionary<ulong, ClientStatsViewModel> ClientStats =>ThreadedReplicationServer.ClientStats;
     }
 }

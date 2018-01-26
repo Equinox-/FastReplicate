@@ -141,6 +141,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ClientData.cs" />
+    <Compile Include="ClientStatsViewModel.cs" />
     <Compile Include="ConcurrentReplicationCallback.cs" />
     <Compile Include="FastReplicatePlugin.cs" />
     <Compile Include="GeneratedMethods.cs" />
