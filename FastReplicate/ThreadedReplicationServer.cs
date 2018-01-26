@@ -340,7 +340,14 @@ namespace FastReplicate
             private readonly Dictionary<TK, TB> _backing;
             private readonly List<TV> _values;
 
-            public IReadOnlyList<TV> Values => _values;
+            public IReadOnlyList<TV> Values
+            {
+                get
+                {
+                    CheckProxyTable();
+                    return _values;
+                }
+            }
 
             private static readonly Func<Dictionary<TK, TB>, int> _backingVersionGet =
                 FieldAccess.CreateGetter<Dictionary<TK, TB>, int>(
