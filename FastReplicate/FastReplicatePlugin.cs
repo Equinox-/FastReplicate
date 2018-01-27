@@ -49,12 +49,6 @@ namespace FastReplicate
             set => ThreadedReplicationServer.UseReplicationHack = value;
         }
 
-        public int MaxStaticPackets
-        {
-            get => ThreadedReplicationServer.MaxStaticPackets;
-            set => ThreadedReplicationServer.MaxStaticPackets = value;
-        }
-
         public float TargetPacketFill
         {
             get => ThreadedReplicationServer.TargetPacketFill;

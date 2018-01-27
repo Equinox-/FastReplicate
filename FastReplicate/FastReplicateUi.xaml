@@ -16,12 +16,6 @@
         <CheckBox Content="Use Fast Replication" HorizontalAlignment="Left" Margin="3" VerticalAlignment="Top"
                   IsChecked="{Binding UseFastReplication}" ToolTip="Use the fast replication system" />
         <StackPanel Orientation="Horizontal">
-            <TextBox Text="{Binding MaxStaticPackets}" Margin="3,3,0,3" Width="70"
-                     IsEnabled="{Binding UseFastReplication}" />
-            <Label Content="Maximum Static Packets"
-                   ToolTip="Maximum number of non-streaming packets to send per tick per client.  Lower is faster, higher is less desync." />
-        </StackPanel>
-        <StackPanel Orientation="Horizontal">
             <TextBox Text="{Binding TargetPacketFill}" Margin="3,3,0,3" Width="70"
                      IsEnabled="{Binding UseFastReplication}" />
             <Label Content="Target Packet Fill"

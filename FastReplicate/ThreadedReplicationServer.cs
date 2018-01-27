@@ -31,8 +31,7 @@ namespace FastReplicate
         #region Config
 
         public static bool UseReplicationHack = true;
-        public static int MaxStaticPackets = 8;
-        public static float TargetPacketFill = 0.9f;
+        public static float TargetPacketFill = 1f;
 
         public static readonly MtObservableSortedDictionary<ulong, ClientStatsViewModel> ClientStats =
             new MtObservableSortedDictionary<ulong, ClientStatsViewModel>();
@@ -95,12 +94,9 @@ namespace FastReplicate
                 MPriorityUpdates.ApplyRemovals();
                 return;
             }
-
-//            ParallelTasks.Parallel.ForEach(_clientStates, (x) => x.Value.Update());
-//            System.Threading.Tasks.Parallel.ForEach(ClientStates.Values, (x) => x.Update());
+            
             System.Threading.Tasks.Parallel.For(0, ClientStates.Values.Count, new ParallelOptions(),
                 (x) => ClientStates.Values[x].Update());
-//            ParallelTasks.Parallel.For(0, ClientStates.Values.Count, (x) => ClientStates.Values[x].Update());
 
 
             foreach (var client in ClientStates)

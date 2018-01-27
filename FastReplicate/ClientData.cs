@@ -350,6 +350,8 @@ namespace FastReplicate
 
         public void Update()
         {
+            if (!IsReady)
+                return;
             UpdateNearbyReplicables();
             SendReplicables();
             _stats.TotalBitsSent = _totalBitsSent;
@@ -357,90 +359,66 @@ namespace FastReplicate
             _totalBitsSent = 0;
         }
 
-        public void UpdateNearbyReplicables()
+        private void UpdateNearbyReplicables()
         {
-            if (!IsReady) return;
             _layerUpdateHash.Clear();
             _toDeleteHash.Clear();
             _lastLayerAdditions.Clear();
-            IMyReplicable controlledReplicable = State.ControlledReplicable;
-            IMyReplicable characterReplicable = State.CharacterReplicable;
-            int num = UpdateLayers.Length;
-            foreach (MyReplicationServer.UpdateLayer layer in UpdateLayers)
+            var controlledReplicable = State.ControlledReplicable;
+            var characterReplicable = State.CharacterReplicable;
+            for (var layerIndex = 0; layerIndex < UpdateLayers.Length; layerIndex++)
             {
-                num--;
-                Vector3D min = State.Position -
-                               new Vector3D(layer.Descriptor.Radius);
-                BoundingBoxD aabb = new BoundingBoxD(min,
-                    State.Position + new Vector3D(layer.Descriptor.Radius));
+                MyReplicationServer.UpdateLayer layer = UpdateLayers[layerIndex];
+                BoundingBoxD aabb = new BoundingBoxD(State.Position - layer.Descriptor.Radius,
+                    State.Position + layer.Descriptor.Radius);
                 using (var repBase = _server.BorrowReplicables(true))
                     repBase.Value.GetReplicablesInBox(aabb, layer.Updater.List);
                 foreach (IMyReplicable item in layer.Replicables)
-                {
                     if (!_layerUpdateHash.Contains(item))
-                    {
                         _toDeleteHash.Add(item);
-                    }
-                }
 
                 layer.Replicables.Clear();
-                foreach (IMyReplicable rep in layer.Updater.List)
-                {
+
+                foreach (var rep in layer.Updater.List)
                     AddReplicableToLayer(rep, layer);
-                }
 
-                foreach (KeyValuePair<IMyReplicable, byte> keyValuePair2 in PermanentReplicables)
-                {
-                    if (keyValuePair2.Value == num)
-                    {
-                        AddReplicableToLayer(keyValuePair2.Key, layer);
-                    }
-                }
+                foreach (KeyValuePair<IMyReplicable, byte> kv in PermanentReplicables)
+                    if (kv.Value == layerIndex)
+                        AddReplicableToLayer(kv.Key, layer);
 
-                if (num == 0)
+                // ensure the highest res layer has controlled info
+                if (layerIndex == 0)
                 {
                     if (controlledReplicable != null)
-                    {
                         AddReplicableToLayer(controlledReplicable, layer);
+                    if (characterReplicable != null)
                         AddReplicableToLayer(characterReplicable, layer);
-                    }
-
-                    foreach (IMyReplicable rep2 in _lastLayerAdditions)
-                    {
-                        AddReplicableToLayer(rep2, layer);
-                    }
                 }
 
-                layer.Updater.List.Clear();
-                layer.Sender.List.Clear();
-                foreach (IMyReplicable item2 in layer.Replicables)
+                // the lowest res has all replicables
+                if (layerIndex == UpdateLayers.Length - 1)
                 {
-                    layer.Updater.List.Add(item2);
-                    layer.Sender.List.Add(item2);
+                    foreach (var rep in _lastLayerAdditions)
+                        AddReplicableToLayer(rep, layer);
                 }
+
+                layer.Updater.List.Set(layer.Replicables);
+                layer.Sender.List.Set(layer.Replicables);
 
                 layer.Updater.Update();
                 layer.Updater.Iterate((rep) => { RefreshReplicable(rep, true); });
             }
 
-            foreach (IMyReplicable myReplicable2 in _toDeleteHash)
-            {
-                if (HasReplicable(myReplicable2))
-                {
-                    IMyReplicable replicable2 = myReplicable2;
-                    RemoveForClient(replicable2, true);
-                }
-            }
+            foreach (IMyReplicable toDelete in _toDeleteHash)
+                if (HasReplicable(toDelete))
+                    RemoveForClient(toDelete, true);
 
             _stats.TotalRoots = _lastLayerAdditions.Count;
             _toDeleteHash.Clear();
         }
 
-        public void SendReplicables()
+        private void SendReplicables()
         {
-            if (!IsReady)
-                return;
-
             _replicablesToSend.Clear();
             foreach (var layer in UpdateLayers)
             {
@@ -448,6 +426,8 @@ namespace FastReplicate
                 layer.Sender.Iterate((x) => _replicablesToSend.Add(x));
             }
 
+            if (_replicablesToSend.Count == 0)
+                return;
             SendStateSync(_replicablesToSend);
             _replicablesToSend.Clear();
         }
@@ -463,47 +443,10 @@ namespace FastReplicate
             _server.Callback.SendStateSync(_sendStream, State.EndpointId, false);
         }
 
-        private readonly List<MyStateDataEntry> _preparedStreaming = new List<MyStateDataEntry>();
-        private readonly List<MyStateDataEntry> _preparedSorted = new List<MyStateDataEntry>();
-
-        private void SendStateSync(ICollection<MyStateDataEntry> streaming, IList<MyStateDataEntry> sorted, out int staticPacketsSent, out int streamingPacketsSent)
-        {
-            if (StateGroups.Count == 0 || DirtyGroups.Count == 0)
-            {
-                staticPacketsSent = 0;
-                streamingPacketsSent = 0;
-                return;
-            }
-
-            EventQueue.Send();
-            byte b = (byte) (LastReceivedAckId - 6);
-            byte b2 = (byte) (StateSyncPacketId + 1);
-            if (WaitingForReset || b2 == b)
-            {
-                WaitingForReset = true;
-                staticPacketsSent = 0;
-                streamingPacketsSent = 0;
-                return;
-            }
-
-            staticPacketsSent = 0;
-            while (staticPacketsSent < ThreadedReplicationServer.MaxStaticPackets && SendStateSync(sorted))
-                staticPacketsSent++;
-
-            if (streaming.Count > 0)
-                SendStreamingEntries(streaming, out streamingPacketsSent);
-            else
-                streamingPacketsSent = 0;
-        }
-
         private void CleanupIslands()
         {
-            if (StateGroups.Count == 0 || DirtyGroups.Count == 0)
-                return;
             foreach (IMyStateGroup value in DirtyGroupsToRemove)
-            {
                 DirtyGroups.Remove(value);
-            }
 
             DirtyGroupsToRemove.Clear();
             using (var islandEnumerator = GeneratedMethods.ClientDataIslandsEnumerator(Islands))
@@ -544,17 +487,41 @@ namespace FastReplicate
                 return;
             }
 
-            using (var streaming = ListCache<MyStateDataEntry>.BorrowList())
+            EventQueue.Send();
+            using (var streaming = CollectionCache<List<MyStateDataEntry>, MyStateDataEntry>.Borrow())
             {
-                using (var sorted = ListCache<MyStateDataEntry>.BorrowList())
+                using (var sorted = CollectionCache<List<MyStateDataEntry>, MyStateDataEntry>.Borrow())
                 {
                     FillEntries(replicables, streaming.Value, sorted.Value);
 
                     _stats.StreamingRoots = streaming.Value.Count;
                     _stats.StaticReplicables = sorted.Value.Count;
-                    SendStateSync(streaming.Value, sorted.Value, out var bulk, out var streamingCount);
-                    _stats.StaticPacketsSent = bulk;
-                    _stats.StreamingPacketsSent = streamingCount;
+
+                    byte b = (byte) (LastReceivedAckId - 6);
+                    byte b2 = (byte) (StateSyncPacketId + 1);
+                    if (WaitingForReset || b2 == b)
+                    {
+                        _stats.StaticPacketsSent = 0;
+                        _stats.StreamingPacketsSent = 0;
+                        _stats.StaticReplicablesUnsent = sorted.Value.Count;
+                        return;
+                    }
+
+                    var staticPacketsSent = 0;
+                    while (SendStateSync(sorted.Value) && staticPacketsSent <= 7)
+                        staticPacketsSent++;
+                    staticPacketsSent++; // because of order.
+
+                    var streamingPacketsSent = 0;
+                    
+
+                    if (streaming.Value.Count > 0)
+                        SendStreamingEntries(streaming.Value, out streamingPacketsSent);
+                    else
+                        streamingPacketsSent = 0;
+
+                    _stats.StaticPacketsSent = staticPacketsSent;
+                    _stats.StreamingPacketsSent = streamingPacketsSent;
                     _stats.StaticReplicablesUnsent = sorted.Value.Count;
                 }
             }
@@ -566,8 +533,7 @@ namespace FastReplicate
 
         #region State API
 
-        public void RefreshReplicable(IMyReplicable replicable,
-            bool checkDependencies = false)
+        public void RefreshReplicable(IMyReplicable replicable, bool checkDependencies = false)
         {
             if (!IsReady)
                 return;
@@ -575,8 +541,7 @@ namespace FastReplicate
             var updateTime = _server.Callback.GetUpdateTime();
 
             bool exists = Replicables.TryGetValue(replicable, out MyReplicableClientData data);
-            float priority =
-                replicable.GetPriority(GeneratedMethods.AllocateClientInfo(InternalClientData), false);
+            float priority = replicable.GetPriority(GeneratedMethods.AllocateClientInfo(InternalClientData), false);
             if (exists)
                 data.Priority = priority;
 
@@ -602,10 +567,10 @@ namespace FastReplicate
 
             AddClientReplicable(replicable, priority, force);
             SendReplicationCreate(replicable);
-            IMyStreamableReplicable myStreamableReplicable = replicable as IMyStreamableReplicable;
-            if (myStreamableReplicable == null)
+            var streamable = replicable as IMyStreamableReplicable;
+            if (streamable == null)
             {
-                using (var list = ListCache<IMyReplicable>.BorrowList())
+                using (var list = CollectionCache<List<IMyReplicable>, IMyReplicable>.Borrow())
                 {
                     using (var repBase = _server.BorrowReplicables(true))
                     {
@@ -617,7 +582,7 @@ namespace FastReplicate
                 }
             }
 
-            using (var list = ListCache<IMyReplicable>.BorrowList())
+            using (var list = CollectionCache<List<IMyReplicable>, IMyReplicable>.Borrow())
             {
                 using (new ReplicableLock(replicable))
                 {
@@ -627,9 +592,8 @@ namespace FastReplicate
                         if (physDeps == null || physDeps.Count == 0)
                             return;
 
-                        if (myStreamableReplicable == null || !ReplicableToIsland.Contains(myStreamableReplicable))
-                            GeneratedMethods.CreateNewCachedIsland(InternalClientData, replicable, physDeps,
-                                _server.MServerTimeStamp);
+                        if (streamable == null || !ReplicableToIsland.Contains(streamable))
+                            GeneratedMethods.CreateNewCachedIsland(InternalClientData, replicable, physDeps, _server.MServerTimeStamp);
 
                         list.Set(physDeps);
                     }
@@ -645,24 +609,22 @@ namespace FastReplicate
         {
             using (var repBase = _server.BorrowReplicables(false))
                 repBase.Value.RefreshChildrenHierarchy(replicable);
-            using (var list = ListCache<IMyReplicable>.BorrowList())
+            using (var list = CollectionCache<List<IMyReplicable>, IMyReplicable>.Borrow())
             {
                 using (var repBase = _server.BorrowReplicables(true))
                     repBase.Value.GetAllChildren(replicable, list.Value);
                 list.Value.Add(replicable);
-                foreach (IMyReplicable myReplicable in list.Value)
+                foreach (var child in list.Value)
                 {
-                    _blockedReplicablesRemove(BlockedReplicables, myReplicable);
+                    _blockedReplicablesRemove(BlockedReplicables, child);
                     if (sendDestroyToClient)
-                        SendReplicationDestroy(myReplicable);
+                        SendReplicationDestroy(child);
 
-                    RemoveClientReplicable(myReplicable);
+                    RemoveClientReplicable(child);
                 }
 
                 foreach (MyReplicationServer.UpdateLayer updateLayer in UpdateLayers)
-                {
                     updateLayer.Replicables.Remove(replicable);
-                }
             }
         }
 
@@ -670,16 +632,15 @@ namespace FastReplicate
 
         #region Layer API
 
-        public void AddReplicableToLayer(IMyReplicable rep,
-            MyReplicationServer.UpdateLayer layer)
+        private void AddReplicableToLayer(IMyReplicable rep, MyReplicationServer.UpdateLayer layer)
         {
             if (!AddReplicableToLayerSingle(rep, layer))
                 return;
-            using (var list = ListCache<IMyReplicable>.BorrowList())
+            using (var list = CollectionCache<List<IMyReplicable>, IMyReplicable>.Borrow())
             {
-                using (var repBase = _server.BorrowReplicables(true))
+                using (new ReplicableLock(rep))
                 {
-                    using (new ReplicableLock(rep))
+                    using (var repBase = _server.BorrowReplicables(true))
                     {
                         var physDeps = rep.GetPhysicalDependencies(_server.MServerTimeStamp, repBase.Value);
                         if (physDeps == null || physDeps.Count == 0)
@@ -693,7 +654,7 @@ namespace FastReplicate
             }
         }
 
-        public bool AddReplicableToLayerSingle(IMyReplicable rep, MyReplicationServer.UpdateLayer layer)
+        private bool AddReplicableToLayerSingle(IMyReplicable rep, MyReplicationServer.UpdateLayer layer)
         {
             if (!_layerUpdateHash.Add(rep))
                 return false;
@@ -701,17 +662,12 @@ namespace FastReplicate
             layer.Replicables.Add(rep);
             _toDeleteHash.Remove(rep);
 
-            using (var list = ListCache<IMyReplicable>.BorrowList())
+            using (new ReplicableLock(rep))
             {
-                using (new ReplicableLock(rep))
-                {
-                    HashSet<IMyReplicable> dependencies = rep.GetDependencies();
-                    if (dependencies == null)
-                        return true;
-                    list.Set(dependencies);
-                }
-
-                foreach (IMyReplicable item in list.Value)
+                HashSet<IMyReplicable> dependencies = rep.GetDependencies();
+                if (dependencies == null)
+                    return true;
+                foreach (IMyReplicable item in dependencies)
                     _lastLayerAdditions.Add(item);
             }
 
@@ -813,9 +769,10 @@ namespace FastReplicate
             _bandwidthCounter.Clear();
             int acksSent = 0;
 
-            var maxBitsToSerialize = (int) (maxBitsToSend * MathHelper.Clamp(ThreadedReplicationServer.TargetPacketFill, 0.25f, 1));
+            var maxBitsToSerialize =
+                (int) (maxBitsToSend * MathHelper.Clamp(ThreadedReplicationServer.TargetPacketFill, 0.25f, 1));
 
-            using (var removedIndices = ListCache<int>.BorrowList())
+            using (var removedIndices = CollectionCache<List<int>, int>.Borrow())
             {
                 for (var index = 0; index < toSend.Count; index++)
                 {
@@ -875,19 +832,13 @@ namespace FastReplicate
             var streamer = obj as IMyStreamableReplicable;
             bool isStreaming = streamer != null && streamer.NeedsToBeStreamed;
             if (streamer != null && !streamer.NeedsToBeStreamed)
-            {
                 _sendStream.WriteByte((byte) (stateGroups.Count - 1));
-            }
             else
-            {
                 _sendStream.WriteByte((byte) stateGroups.Count);
-            }
 
             foreach (var t in stateGroups)
                 if (isStreaming || t.GroupType != StateGroupEnum.Streaming)
-                {
                     _sendStream.WriteNetworkId(_server.GetNetworkIdByObject(t));
-                }
 
             if (isStreaming)
             {
@@ -960,7 +911,7 @@ namespace FastReplicate
             IMyReplicable owner = entry.Group.Owner;
             if (owner == null)
                 return;
-            using (var list = ListCache<IMyReplicable>.BorrowList())
+            using (var list = CollectionCache<List<IMyReplicable>, IMyReplicable>.Borrow())
             {
                 using (var repBase = _server.BorrowReplicables(true))
                     repBase.Value.GetAllChildren(owner, list.Value);
@@ -968,7 +919,8 @@ namespace FastReplicate
                 {
                     if (HasReplicable(replicable))
                         continue;
-                    AddForClient(replicable, owner.GetPriority(GeneratedMethods.AllocateClientInfo(InternalClientData), true), false);
+                    AddForClient(replicable,
+                        owner.GetPriority(GeneratedMethods.AllocateClientInfo(InternalClientData), true), false);
                 }
             }
         }
@@ -994,19 +946,16 @@ namespace FastReplicate
             {
                 Priority = priority
             });
-            foreach (IMyStateGroup myStateGroup in _server.MReplicableGroups[replicable])
+            foreach (IMyStateGroup group in _server.MReplicableGroups[replicable])
             {
-                NetworkId networkIdByObject = _server.GetNetworkIdByObject(myStateGroup);
-                if (myStateGroup.GroupType != StateGroupEnum.Streaming ||
-                    (replicable as IMyStreamableReplicable).NeedsToBeStreamed)
+                var netid = _server.GetNetworkIdByObject(group);
+                if (group.GroupType != StateGroupEnum.Streaming || ((IMyStreamableReplicable) replicable).NeedsToBeStreamed)
                 {
-                    StateGroups.Add(myStateGroup, new MyStateDataEntry(networkIdByObject, myStateGroup));
-                    DirtyGroups.Add(myStateGroup);
-                    myStateGroup.CreateClientData(State);
+                    StateGroups.Add(group, new MyStateDataEntry(netid, group));
+                    DirtyGroups.Add(group);
+                    group.CreateClientData(State);
                     if (force)
-                    {
-                        myStateGroup.ForceSend(State);
-                    }
+                        group.ForceSend(State);
                 }
             }
         }
@@ -1016,11 +965,11 @@ namespace FastReplicate
             if (!_server.MReplicableGroups.TryGetValue(replicable, out var stateGroup))
                 return;
 
-            foreach (IMyStateGroup myStateGroup in stateGroup)
+            foreach (var group in stateGroup)
             {
-                myStateGroup.DestroyClientData(State);
-                StateGroups.Remove(myStateGroup);
-                DirtyGroups.Remove(myStateGroup);
+                group.DestroyClientData(State);
+                StateGroups.Remove(group);
+                DirtyGroups.Remove(group);
             }
 
             Replicables.Remove(replicable);
