@@ -1,26 +1,10 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Linq;
-using System.Reflection;
-using System.Reflection.Emit;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows.Controls;
-using Sandbox.Engine.Multiplayer;
-using Sandbox.Game.Multiplayer;
+﻿using System.Windows.Controls;
 using Torch;
 using Torch.API;
 using Torch.API.Managers;
 using Torch.API.Plugins;
 using Torch.Collections;
 using Torch.Managers.PatchManager;
-using Torch.Managers.PatchManager.MSIL;
-using Torch.Utils;
-using VRage.Library.Collections;
-using VRage.Network;
-using VRage.Replication;
 using VRageMath;
 
 namespace FastReplicate

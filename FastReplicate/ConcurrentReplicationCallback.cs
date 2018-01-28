@@ -1,9 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 using Sandbox.Engine.Multiplayer;
 using Sandbox.Game.Multiplayer;
 using Torch.Utils;
@@ -27,7 +23,7 @@ namespace FastReplicate
         [ReflectedGetter(Name = "m_channel", TypeName = TransportLayerType)]
         private static readonly Func<object, int> _transportChannel;
 
-        [ReflectedGetter(Name ="TransportLayer")]
+        [ReflectedGetter(Name = "TransportLayer")]
         private static readonly Func<MySyncLayer, object> _transportLayerGetter;
 #pragma warning restore 649
 
@@ -52,10 +48,12 @@ namespace FastReplicate
             var sendStream = _sendStreamCache.Value;
             var channel = _transportChannel(TransportLayer);
 
+            var mode = reliable ? MyP2PMessageEnum.ReliableWithBuffering : MyP2PMessageEnum.Unreliable;
+
             if (reliable && stream != null)
             {
                 byte b = (byte) (stream.BytePosition / _sizeMtr + 1);
-                for (int i = 0; i < (int) b; i++)
+                for (int i = 0; i < b; i++)
                 {
                     sendStream.Position = 0L;
                     sendStream.WriteByte((byte) id);
@@ -69,10 +67,9 @@ namespace FastReplicate
                         num2 = stream.BytePosition - num;
                     }
 
-                    sendStream.WriteNoAlloc((byte*) ((void*) stream.DataPointer), num, num2);
-                    _transportSendMessage(TransportLayer, sendStream,
-                        reliable ? MyP2PMessageEnum.ReliableWithBuffering : MyP2PMessageEnum.Unreliable, endpoint.Value,
-                        channel);
+                    sendStream.WriteNoAlloc((byte*) stream.DataPointer.ToPointer(), num, num2);
+
+                    _transportSendMessage(TransportLayer, sendStream, mode, endpoint.Value, channel);
                 }
 
                 return;
@@ -83,10 +80,9 @@ namespace FastReplicate
             sendStream.WriteByte(index);
             sendStream.WriteByte(1);
             if (stream != null)
-                sendStream.WriteNoAlloc((byte*) ((void*) stream.DataPointer), 0, stream.BytePosition);
-            _transportSendMessage(TransportLayer, sendStream,
-                reliable ? MyP2PMessageEnum.ReliableWithBuffering : MyP2PMessageEnum.Unreliable, endpoint.Value,
-                channel);
+                sendStream.WriteNoAlloc((byte*) stream.DataPointer.ToPointer(), 0, stream.BytePosition);
+
+            _transportSendMessage(TransportLayer, sendStream, mode, endpoint.Value, channel);
         }
 
 
@@ -147,7 +143,7 @@ namespace FastReplicate
         {
             SendMessage(MyMessageId.RPC, stream, reliable, endpoint, 0);
         }
-        
+
         public void SentClientJoined(BitStream stream, EndpointId endpoint)
         {
             SendMessage(MyMessageId.CLIENT_CONNNECTED, stream, true, endpoint, 0);

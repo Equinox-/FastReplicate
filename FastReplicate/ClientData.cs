@@ -1,14 +1,11 @@
 ﻿using System;
 using System.Collections;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
-using Sandbox.Game.Entities.Character;
-using Sandbox.Game.Replication;
+using NLog;
 using Torch.Utils;
 using VRage.Collections;
-using VRage.Game;
 using VRage.Library.Collections;
 using VRage.Library.Utils;
 using VRage.Network;
@@ -338,6 +335,8 @@ namespace FastReplicate
         private readonly ClientStatsViewModel _stats;
         private long _totalBitsSent;
 
+        private static readonly Logger _log = LogManager.GetCurrentClassLogger();
+
         public ClientData(ThreadedReplicationServer server, Endpoint endpoint, ClientStatsViewModel stats)
         {
             _server = server;
@@ -352,11 +351,18 @@ namespace FastReplicate
         {
             if (!IsReady)
                 return;
-            UpdateNearbyReplicables();
-            SendReplicables();
-            _stats.TotalBitsSent = _totalBitsSent;
-            _stats.TickAverages();
-            _totalBitsSent = 0;
+            try
+            {
+                UpdateNearbyReplicables();
+                SendReplicables();
+                _stats.TotalBitsSent = _totalBitsSent;
+                _stats.TickAverages();
+                _totalBitsSent = 0;
+            }
+            catch (Exception e)
+            {
+                _log.Error(e.ToString());
+            }
         }
 
         private void UpdateNearbyReplicables()
@@ -513,7 +519,7 @@ namespace FastReplicate
                     staticPacketsSent++; // because of order.
 
                     var streamingPacketsSent = 0;
-                    
+
 
                     if (streaming.Value.Count > 0)
                         SendStreamingEntries(streaming.Value, out streamingPacketsSent);
@@ -780,8 +786,9 @@ namespace FastReplicate
 
                     int originalPosition = _sendStream.BitPosition;
                     _sendStream.WriteNetworkId(send.GroupId);
-                    send.Group.Serialize(_sendStream, State.EndpointId, timestamp,
-                        StateSyncPacketId, maxBitsToSend, ClientCachedData);
+                    using (new StateGroupLock(send.Group))
+                        send.Group.Serialize(_sendStream, State.EndpointId, timestamp,
+                            StateSyncPacketId, maxBitsToSend, ClientCachedData);
                     int totalBits = _sendStream.BitPosition - originalPosition;
                     if (totalBits > 0 && _sendStream.BitPosition <= maxBitsToSend &&
                         _bandwidthCounter.Add(send.Group.GroupType, totalBits))
@@ -892,8 +899,8 @@ namespace FastReplicate
             MyTimeSpan timestamp = WritePacketHeader(true);
             int bitPosition = _sendStream.BitPosition;
             _sendStream.WriteNetworkId(entry.GroupId);
-            entry.Group.Serialize(_sendStream, State.EndpointId, timestamp, StateSyncPacketId, maxValue,
-                ClientCachedData);
+            using (new StateGroupLock(entry.Group))
+                entry.Group.Serialize(_sendStream, State.EndpointId, timestamp, StateSyncPacketId, maxValue, ClientCachedData);
             if (entry.Group.IsProcessingForClient(State.EndpointId))
             {
                 return;

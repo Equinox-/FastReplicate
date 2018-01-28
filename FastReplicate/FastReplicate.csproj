@@ -148,6 +148,7 @@
     <Compile Include="BandwidthCounter.cs" />
     <Compile Include="CollectionCache.cs" />
     <Compile Include="Patch.cs" />
+    <Compile Include="StateGroupLock.cs" />
     <Compile Include="ThreadedReplicationServer.cs" />
     <Compile Include="FastReplicateUi.xaml.cs">
       <DependentUpon>FastReplicateUi.xaml</DependentUpon>

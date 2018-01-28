@@ -1,17 +1,11 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq.Expressions;
-using System.Net;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using NLog;
-using ParallelTasks;
-using Sandbox.Engine.Multiplayer;
 using Torch.Collections;
-using Torch.Managers.PatchManager;
-using Torch.Managers.PatchManager.MSIL;
 using Torch.Utils;
 using VRage;
 using VRage.Collections;
@@ -19,7 +13,6 @@ using VRage.Library.Collections;
 using VRage.Library.Utils;
 using VRage.Network;
 using VRage.Replication;
-using VRageMath;
 using TClientData = System.Object;
 
 // ReSharper disable BuiltInTypeReferenceStyle
@@ -31,7 +24,7 @@ namespace FastReplicate
         #region Config
 
         public static bool UseReplicationHack = true;
-        public static float TargetPacketFill = 1f;
+        public static float TargetPacketFill = 0.95f;
 
         public static readonly MtObservableSortedDictionary<ulong, ClientStatsViewModel> ClientStats =
             new MtObservableSortedDictionary<ulong, ClientStatsViewModel>();
